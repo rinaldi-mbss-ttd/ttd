@@ -29,17 +29,27 @@ canvas{max-width:100%}
 .prev{border:1px solid #dfe3e8;background:#fff;border-radius:8px}
 #vwrap{text-align:center;padding:24px 12px}
 #vwrap canvas{border:1px solid #dfe3e8;border-radius:10px;background:#fff;width:100%;max-width:420px}
-#vlabel{font-size:18px;font-weight:600;margin-top:12px;white-space:pre-wrap}
-#vnote{font-size:12px;color:#5b6470;margin-top:8px}
+#vhead{font-size:13px;color:#5b6470;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+#vstamp{display:inline-block;margin-bottom:12px;padding:6px 16px;border:2px solid #0b7a4f;color:#0b7a4f;border-radius:999px;font-weight:700;letter-spacing:.06em}
+#vname{font-size:20px;font-weight:700;margin-top:12px}
+#vrole{font-size:14px;color:#3b4350;margin-bottom:12px}
+#vtbl{margin:0 auto;border-collapse:collapse;font-size:14px;text-align:left;width:100%;max-width:420px}
+#vtbl td{padding:7px 8px;border-top:1px solid #e3e6ea}
+#vtbl td:first-child{color:#5b6470;width:38%}
+#vnote{font-size:12px;color:#5b6470;margin-top:14px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:520px){.g2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 
 <main id="viewer" hidden>
   <div id="vwrap">
-    <h1>Tanda Tangan Digital</h1>
+    <div id="vhead">Verifikasi Tanda Tangan</div>
+    <div id="vstamp" hidden></div><br>
     <canvas id="vcanvas"></canvas>
-    <div id="vlabel"></div>
+    <div id="vname"></div><div id="vrole"></div>
+    <table id="vtbl"></table>
     <div id="vnote"></div>
   </div>
 </main>
@@ -67,8 +77,20 @@ canvas{max-width:100%}
 
   <div class="card">
     <h2>2. Pengaturan</h2>
-    <label>Keterangan (muncul di bawah tanda tangan, maks ±80 huruf)</label>
-    <input type="text" id="label" maxlength="80" placeholder="Rinaldi - Koordinator Keamanan MBSS - 23/11/2026">
+    <div class="g2">
+      <div><label>Nama</label><input type="text" id="nama" maxlength="40"></div>
+      <div><label>Jabatan</label><input type="text" id="jabatan" maxlength="50"></div>
+    </div>
+    <label>Jenis dokumen</label>
+    <input type="text" id="jenis" maxlength="40" list="jenisList" placeholder="Pilih atau ketik sendiri">
+    <datalist id="jenisList"><option value="Laporan Harian Satpam"><option value="Laporan Patroli"><option value="Surat Resmi MBSS"><option value="Surat Tugas"><option value="Laporan Insiden"></datalist>
+    <div class="g2">
+      <div><label>Nomor surat / laporan (diketik manual)</label><input type="text" id="nomor" maxlength="30" placeholder="001/SEC/XI/2026"></div>
+      <div><label>Tanggal (otomatis hari ini)</label><input type="date" id="tgl"></div>
+    </div>
+    <label>Stempel status</label>
+    <select id="status"><option>VALID</option><option>DISETUJUI</option><option>DIKETAHUI</option><option value="">(tanpa stempel)</option></select>
+    <div class="note" id="saved"></div>
     <label>Ketebalan garis: <span id="thv"></span></label>
     <input type="range" id="th" min="140" max="235" value="195">
     <label>Detail (makin besar = makin jelas, QR makin padat)</label>
@@ -2399,7 +2421,7 @@ const canZ=typeof CompressionStream!=='undefined';
 /* ---------- format ----------
  byte0 w, byte1 h, byte2 labelLen, label utf8, lalu run-length (varint), run bergantian mulai dari putih */
 function encodeBits(bits,w,h,label){
-  const lb=new TextEncoder().encode(label).slice(0,120);
+  const lb=new TextEncoder().encode(label).slice(0,250);
   const out=[w,h,lb.length,...lb];
   let cur=0,run=0;
   const push=n=>{while(n>=128){out.push((n&127)|128);n>>=7}out.push(n)};
@@ -2436,8 +2458,17 @@ async function showViewer(){
     const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
     x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';
     x.drawImage(sm,pad,pad,d.w*S,d.h*S);
-    $('vlabel').textContent=d.label;
-    $('vnote').textContent='Tanda tangan ini tersimpan di dalam QR Code itu sendiri.';
+    const p=d.label.split('\n');
+    if(p.length<2){$('vname').textContent=d.label}
+    else{
+      const[nm,jb,jn,no,tg,st]=p;
+      $('vname').textContent=nm;$('vrole').textContent=jb;
+      if(st){$('vstamp').textContent='\u2714 '+st;$('vstamp').hidden=false}
+      const rows=[['Jenis dokumen',jn],['Nomor',no],['Tanggal',tg]].filter(r=>r[1]);
+      $('vtbl').innerHTML=rows.map(r=>'<tr><td></td><td></td></tr>').join('');
+      [...$('vtbl').rows].forEach((tr,i)=>{tr.cells[0].textContent=rows[i][0];tr.cells[1].textContent=rows[i][1]});
+    }
+    $('vnote').textContent='Data dan tanda tangan ini tersimpan di dalam QR Code itu sendiri.';
   }catch(e){$('vwrap').innerHTML='<h1>Data tidak valid</h1><p>QR tidak dapat dibaca. Pastikan QR discan utuh.</p>'}
 }
 if(location.hash.startsWith('#s=')){showViewer()}
@@ -2465,13 +2496,24 @@ function initEditor(){
       const sc=Math.min(1,1400/img.width);
       imgc.width=Math.round(img.width*sc);imgc.height=Math.round(img.height*sc);
       ic.fillStyle='#fff';ic.fillRect(0,0,imgc.width,imgc.height);
-      ic.drawImage(img,0,0,imgc.width,imgc.height);hasImg=true;gen();
+      ic.drawImage(img,0,0,imgc.width,imgc.height);hasImg=true;try{localStorage.setItem('ttdImg',imgc.toDataURL('image/jpeg',0.85))}catch(e){}saveNote();gen();
     };
     img.src=URL.createObjectURL(f);
   };
 
   $('base').value=localStorage.getItem('ttdBase')||(location.protocol.startsWith('http')?location.href.split('#')[0]:'');
-  ['th','wd','label','base'].forEach(id=>$(id).oninput=gen);
+  const BLN=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const fmtTgl=v=>{if(!v)return'';const[y,m,d]=v.split('-');return(+d)+' '+BLN[+m-1]+' '+y};
+  const keep=['nama','jabatan','jenis','nomor','status'];
+  const dflt={nama:'Rinaldi',jabatan:'Koordinator Keamanan MBSS',jenis:'Laporan Harian Satpam',nomor:'',status:'VALID'};
+  keep.forEach(k=>{let v=null;try{v=localStorage.getItem('ttd_'+k)}catch(e){}$(k).value=v!==null?v:dflt[k]});
+  $('tgl').value=iso(new Date());
+  const meta=()=>[$('nama').value,$('jabatan').value,$('jenis').value,$('nomor').value,fmtTgl($('tgl').value),$('status').value].map(s=>s.trim().replace(/\n/g,' ')).join('\n');
+  ['th','wd','nama','jabatan','jenis','nomor','tgl','status','base'].forEach(id=>{$(id).oninput=gen;$(id).onchange=gen});
+  // tanda tangan tersimpan di perangkat ini
+  const saveNote=()=>{let has=false;try{has=!!localStorage.getItem('ttdImg')}catch(e){}$('saved').innerHTML=has?'Tanda tangan tersimpan di perangkat ini. <a href="#" id="forget">Lupakan</a>':'';const f=$('forget');if(f)f.onclick=e=>{e.preventDefault();try{localStorage.removeItem('ttdImg')}catch(_){}hasImg=false;saveNote();gen()}};
+  try{const s=localStorage.getItem('ttdImg');if(s){const im=new Image();im.onload=()=>{imgc.width=im.width;imgc.height=im.height;ic.fillStyle='#fff';ic.fillRect(0,0,im.width,im.height);ic.drawImage(im,0,0);hasImg=true;saveNote();gen()};im.src=s}}catch(e){}
   $('th').addEventListener('input',()=>$('thv').textContent=$('th').value);
   $('thv').textContent=$('th').value;
 
@@ -2503,7 +2545,7 @@ function initEditor(){
   async function gen(){
     const my=++tok;
     const base=$('base').value.trim();
-    localStorage.setItem('ttdBase',base);
+    try{localStorage.setItem('ttdBase',base);keep.forEach(k=>localStorage.setItem('ttd_'+k,$(k).value));}catch(e){}
     $('baseNote').innerHTML=base?'':'<span class="warn">Isi alamat tempat Anda memasang file ini (lihat tutorial). Tanpa ini QR tidak bisa dibuka di HP lain.</span>';
     const b=bitmap(),qc=$('qr'),pc=$('prev');
     if(!b){qc.width=qc.height=1;pc.width=pc.height=1;$('info').textContent='Belum ada tanda tangan.';return}
@@ -2513,7 +2555,7 @@ function initEditor(){
     for(let i=0;i<b.bits.length;i++)if(b.bits[i]){im.data[i*4+3]=255;im.data[i*4+2]=60}
     sx.putImageData(im,0,0);pcx.imageSmoothingEnabled=true;pcx.drawImage(sm,0,0,pc.width,pc.height);
     // payload
-    let u=encodeBits(b.bits,b.W,b.H,$('label').value),tag='r';
+    let u=encodeBits(b.bits,b.W,b.H,meta()),tag='r';
     if(canZ){try{u=await pipe(u,new CompressionStream('deflate-raw'));tag='z'}catch(e){}}
     if(my!==tok)return;
     const url=(base||'https://contoh.invalid/')+'#s='+tag+b64.enc(u);
